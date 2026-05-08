@@ -207,22 +207,19 @@ export default function App() {
     const commentsText = evals.filter(e => e.comments?.trim()).map(e => `"${e.comments}"`).join('; ');
 
     try {
-      // Direct call to Anthropic API as requested by your original code, enriched with text comments
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const promptText = `Roda de Impacto do time Otmow com ${evals.length} participante(s). Resultados quantitativos: ${statsLines}. Comentários qualitativos/opiniões enviadas: ${commentsText}. Monte uma pauta objetiva de retrospectiva: destaque 2 dimensões com maior divergência ou críticas como tópicos prioritários, 2 destaques positivos como celebração, e traga sugestões de 3 perguntas abertas baseadas nos comentários textuais e dados. Seja extremamente direto, amigável e prático. Não use marcadores ou formatação Markdown muito complexos, prefira parágrafos limpos e amigáveis.`;
+      
+      const res = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [{
-            role: 'user',
-            content: `Roda de Impacto do time Otmow com ${evals.length} participante(s). Resultados quantitativos: ${statsLines}. Comentários qualitativos/opiniões enviadas: ${commentsText}. Monte uma pauta objetiva de retrospectiva: destaque 2 dimensões com maior divergência ou críticas como tópicos prioritários, 2 destaques positivos como celebração, e traga sugestões de 3 perguntas abertas baseadas nos comentários textuais e dados. Seja extremamente direto, amigável e prático.`
-          }]
-        })
+        body: JSON.stringify({ prompt: promptText })
       });
       const data = await res.json();
-      const txt = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
-      setAgenda(txt || 'Sem resposta da IA.');
+      if (data.error) {
+        setAgenda(`Configuração necessária: ${data.error}`);
+      } else {
+        setAgenda(data.text || 'Sem resposta da IA.');
+      }
     } catch (e) {
       setAgenda('Erro ao conectar com a IA. Que tal focar nos pontos de divergência mostrados no painel abaixo?');
     }

@@ -67,6 +67,37 @@ app.post("/api/actionplan", (req, res) => {
   res.json({ success: true });
 });
 
+app.post("/api/ai", async (req, res) => {
+  const { prompt } = req.body;
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return res.status(400).json({ error: "GEMINI_API_KEY não configurado no servidor." });
+  }
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }]
+        })
+      }
+    );
+
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      throw new Error("Resposta inválida da API do Gemini.");
+    }
+    res.json({ text });
+  } catch (error) {
+    console.error("Erro na integração com Gemini:", error);
+    res.status(500).json({ error: "Falha ao gerar insights via Gemini." });
+  }
+});
+
 // Serve static assets in production
 const distPath = path.join(__dirname, "dist");
 app.use(express.static(distPath));
