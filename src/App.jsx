@@ -41,7 +41,33 @@ export default function App() {
   const [newActionText, setNewActionText] = useState('');
   const [newActionOwner, setNewActionOwner] = useState('');
 
+  // Session history
+  const [historyList,  setHistoryList]  = useState([]);
+  const [historyView,  setHistoryView]  = useState(null); // { session, evals, actionPlan }
+
   useEffect(() => { loadData(); }, []);
+
+  // Auto-refresh evals and action plan every 15s when on results screen
+  useEffect(() => {
+    if (screen !== 'results') return;
+    const id = setInterval(refreshEvals, 15000);
+    return () => clearInterval(id);
+  }, [screen]);
+
+  async function loadHistory() {
+    try {
+      const data = await window.firestoreHelpers.getHistory();
+      setHistoryList(data);
+    } catch (e) {}
+  }
+
+  async function openHistoryEntry(id) {
+    try {
+      const data = await window.firestoreHelpers.getHistoryEntry(id);
+      setHistoryView(data);
+      setScreen('history-view');
+    } catch (e) {}
+  }
 
   async function loadData() {
     let sess = null, evArr = [], submitted = false, savedNick = '';
@@ -55,13 +81,13 @@ export default function App() {
     setSession(sess); setEvals(evArr); setHasSub(submitted);
     if (savedNick) setNick(savedNick);
     await loadActionPlan();
+    await loadHistory();
     setScreen('home');
   }
 
   async function loadActionPlan() {
     try {
-      const res = await fetch('/api/actionplan');
-      const data = await res.json();
+      const data = await window.firestoreHelpers.getActionPlan();
       setLessons(data.lessons || []);
       setActions(data.actions || []);
     } catch (e) {}
@@ -69,11 +95,7 @@ export default function App() {
 
   async function saveActionPlan(updatedLessons, updatedActions) {
     try {
-      await fetch('/api/actionplan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lessons: updatedLessons, actions: updatedActions })
-      });
+      await window.firestoreHelpers.saveActionPlan(updatedLessons, updatedActions);
     } catch (e) {}
   }
 
@@ -226,69 +248,46 @@ export default function App() {
     setLoadingAI(false);
   }
 
-  function exportReport() {
-    if (!session) return;
-    
-    let md = `# 📊 Relatório Oficial de Retrospectiva · Ótmow\n\n`;
-    md += `**Sessão:** ${session.name}\n`;
+  function generateMarkdown(sess, evList, lessList, actList, agendaText) {
+    const getStatsFn = (dimId) => {
+      if (!evList.length) return { avg: 0, range: 0 };
+      const vals = evList.map(e => e.ratings[dimId] || 3);
+      const a = vals.reduce((x, y) => x + y, 0) / vals.length;
+      return { avg: a, range: Math.max(...vals) - Math.min(...vals) };
+    };
+    let md = `# Relatório Oficial de Retrospectiva · Ótmow\n\n`;
+    md += `**Sessão:** ${sess.name}\n`;
     md += `**Data do Relatório:** ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}\n`;
-    md += `**Total de Participantes:** ${evals.length} participante(s)\n\n`;
-    
-    md += `--- \n\n`;
-    md += `## 📈 Notas Médias por Dimensão\n\n`;
-    session.dimensions.forEach(d => {
-      const stats = getStats(d.id);
-      md += `- **${d.label}:** Média **${stats.avg.toFixed(1)}/5.0** (Variação: ${stats.range}pts)\n`;
+    md += `**Total de Participantes:** ${evList.length} participante(s)\n\n`;
+    md += `--- \n\n## Notas Médias por Dimensão\n\n`;
+    sess.dimensions.forEach(d => {
+      const s = getStatsFn(d.id);
+      md += `- **${d.label}:** Média **${s.avg.toFixed(1)}/5.0** (Variação: ${s.range}pts)\n`;
     });
-    md += `\n`;
-    
-    md += `--- \n\n`;
-    md += `## 💬 Comentários e Opiniões do Time (Anônimo)\n\n`;
-    const commentsList = evals.filter(e => e.comments?.trim());
-    if (commentsList.length > 0) {
-      commentsList.forEach((e, idx) => {
-        md += `> "${e.comments.trim()}"\n> *— Participante P${idx + 1}*\n\n`;
-      });
+    md += `\n--- \n\n## Comentários e Opiniões do Time (Anônimo)\n\n`;
+    const comments = evList.filter(e => e.comments?.trim());
+    if (comments.length > 0) {
+      comments.forEach((e, idx) => { md += `> "${e.comments.trim()}"\n> *— Participante P${idx + 1}*\n\n`; });
     } else {
       md += `*Nenhum comentário textual enviado.*\n\n`;
     }
-    
-    md += `--- \n\n`;
-    md += `## 💡 Lições Aprendidas\n\n`;
-    if (lessons.length > 0) {
-      lessons.forEach(l => {
-        md += `- ${l}\n`;
-      });
-    } else {
-      md += `*Nenhuma lição aprendida registrada.*\n\n`;
-    }
+    md += `--- \n\n## Lições Aprendidas\n\n`;
+    if (lessList.length > 0) { lessList.forEach(l => { md += `- ${l}\n`; }); } else { md += `*Nenhuma lição registrada.*\n`; }
+    md += `\n--- \n\n## Plano de Ação & Responsáveis\n\n`;
+    if (actList.length > 0) { actList.forEach(a => { md += `- [${a.done ? 'x' : ' '}] **${a.text}** (Responsável: *${a.owner}*)\n`; }); } else { md += `*Nenhum item criado.*\n`; }
     md += `\n`;
-    
-    md += `--- \n\n`;
-    md += `## 🎯 Plano de Ação & Responsáveis\n\n`;
-    if (actions.length > 0) {
-      actions.forEach(act => {
-        md += `- [${act.done ? 'x' : ' '}] **${act.text}** (Responsável: *${act.owner}*)\n`;
-      });
-    } else {
-      md += `*Nenhum item criado no plano de ação.*\n\n`;
-    }
-    md += `\n`;
-    
-    if (agenda) {
-      md += `--- \n\n`;
-      md += `## 📋 Insights sugeridos pela IA\n\n`;
-      md += `${agenda}\n\n`;
-    }
-    
-    md += `--- \n`;
-    md += `*Relatório gerado automaticamente pela ferramenta de Retrospectivas Ótmow.*\n`;
+    if (agendaText) { md += `--- \n\n## Insights sugeridos pela IA\n\n${agendaText}\n\n`; }
+    md += `--- \n*Relatório gerado automaticamente pela ferramenta de Retrospectivas Ótmow.*\n`;
+    return md;
+  }
 
-    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
+  function exportReport() {
+    if (!session) return;
+    const blob = new Blob([generateMarkdown(session, evals, lessons, actions, agenda)], { type: 'text/markdown;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `relatorio_retro_otmow_${session.name.toLowerCase().replace(/\\s+/g, '_')}.md`);
+    link.setAttribute('download', `relatorio_retro_otmow_${session.name.toLowerCase().replace(/\s+/g, '_')}.md`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -407,6 +406,11 @@ export default function App() {
               Nenhuma sessão ativa. O facilitador cria a sessão e compartilha o link — cada pessoa entra, digita seu nome e avalia anonimamente.
             </p>
             <button style={btnP} onClick={() => setScreen('setup')}>Criar nova sessão</button>
+            {historyList.length > 0 && (
+              <button style={{ ...btn, marginTop: 12, width: '100%', justifyContent: 'center' }} onClick={() => { loadHistory(); setScreen('history'); }}>
+                Ver histórico de sessões ({historyList.length})
+              </button>
+            )}
           </>
         ) : (
           <>
@@ -448,6 +452,7 @@ export default function App() {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               <button style={btn} onClick={() => { setScreen('results'); refreshEvals(); }}>Resultados</button>
               <button style={{ ...btn, fontSize: 12, color: C.muted }} onClick={() => setScreen('setup')}>Nova sessão</button>
+              <button style={{ ...btn, fontSize: 12, color: C.muted }} onClick={() => { loadHistory(); setScreen('history'); }}>Histórico</button>
               <button style={{ ...btn, fontSize: 12, color: C.red, borderColor: 'rgba(239,68,68,0.2)' }} onClick={resetSession}>Limpar dados</button>
             </div>
             {err && <p style={{ fontSize: 12, color: C.red, marginTop: 10 }}>{err}</p>}
@@ -531,6 +536,209 @@ export default function App() {
       </div>
     </div>
   );
+
+  // ── HISTORY LIST ──
+  if (screen === 'history') return (
+    <div style={wrap}>
+      <div style={inner}>
+        <Header label="Retrospectiva · Otmow" title="Histórico de Sessões" />
+        {historyList.length === 0 ? (
+          <p style={{ fontSize: 14, color: C.muted }}>Nenhuma sessão arquivada ainda.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {historyList.map(h => (
+              <div key={h.id} style={{ ...card, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px' }}>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 4 }}>{h.name}</div>
+                  <div style={{ fontSize: 12, color: C.muted }}>
+                    {new Date(h.archivedAt).toLocaleDateString('pt-BR')} &nbsp;·&nbsp;
+                    <span style={{ color: C.green, fontWeight: 600 }}>{h.participants} participante(s)</span>
+                  </div>
+                </div>
+                <button style={{ ...btn, padding: '8px 16px', fontSize: 12 }} onClick={() => openHistoryEntry(h.id)}>
+                  Ver
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ marginTop: 24 }}>
+          <button style={btn} onClick={() => setScreen('home')}>Voltar</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── HISTORY VIEW (read-only) ──
+  if (screen === 'history-view' && historyView) {
+    const hSess  = historyView.session;
+    const hEvals = historyView.evals || [];
+    const hLess  = historyView.actionPlan?.lessons || [];
+    const hActs  = historyView.actionPlan?.actions || [];
+
+    function hGetStats(dimId) {
+      if (!hEvals.length) return { avg: 0, range: 0, sd: 0 };
+      const vals = hEvals.map(e => e.ratings[dimId] || 3);
+      const a = vals.reduce((x, y) => x + y, 0) / vals.length;
+      const rng = Math.max(...vals) - Math.min(...vals);
+      const sd = Math.sqrt(vals.map(v => (v - a) ** 2).reduce((x, y) => x + y, 0) / vals.length);
+      return { avg: a, range: rng, sd };
+    }
+
+    const hChartData = hSess.dimensions.map(d => {
+      const vals = hEvals.map(e => e.ratings[d.id] || 3);
+      const avg = parseFloat((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2));
+      const lbl = d.label.length > 15 ? d.label.slice(0, 14) + '…' : d.label;
+      const entry = { dim: lbl, avg };
+      hEvals.forEach((e, i) => { entry['p' + i] = e.ratings[d.id] || 3; });
+      return entry;
+    });
+
+    const hDimStats = hSess.dimensions.map(d => ({ ...d, ...hGetStats(d.id) }));
+    const hBySD  = [...hDimStats].sort((a, b) => b.sd - a.sd);
+    const hByAvg = [...hDimStats].sort((a, b) => b.avg - a.avg);
+
+    return (
+      <div style={wrap}>
+        <div style={inner}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, paddingBottom: 16, borderBottom: `1px solid ${C.border}` }}>
+            <div>
+              <span style={lbl}>{hSess.name} · Arquivada</span>
+              <div style={{ fontSize: 20, fontWeight: 700 }}>Roda de Impacto</div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span style={{ fontSize: 13, color: C.green, fontWeight: 600 }}>{hEvals.length} resp.</span>
+              <button style={{ ...btn, padding: '6px 12px', fontSize: 12 }} onClick={() => setScreen('history')}>Voltar</button>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 14 }}>
+            <span style={{ fontSize: 11, color: C.hint, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Legenda:</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 12, height: 3, background: C.purple, display: 'inline-block', borderRadius: 2 }}></span>
+              <span style={{ fontSize: 12, color: C.muted }}>Média do time</span>
+            </div>
+            {hEvals.map((ev, i) => (
+              <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 12, height: 3, background: COLORS[i % COLORS.length], display: 'inline-block', borderRadius: 2, opacity: 0.7 }}></span>
+                <span style={{ fontSize: 12, color: C.muted }}>P{i + 1}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ width: '100%', height: 300, marginBottom: 24 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <RadarChart data={hChartData}>
+                <PolarGrid stroke="#E2E8F0" />
+                <PolarAngleAxis dataKey="dim" tick={{ fill: '#475569', fontSize: 11, fontWeight: 600 }} />
+                <PolarRadiusAxis angle={30} domain={[0, 5]} tick={{ fill: '#94A3B8', fontSize: 10 }} tickCount={6} />
+                {hEvals.map((ev, i) => (
+                  <Radar key={ev.id} name={`P${i + 1}`} dataKey={`p${i}`}
+                    stroke={COLORS[i % COLORS.length]} fill="transparent"
+                    strokeWidth={1.5} strokeDasharray="4 3"
+                    dot={{ fill: COLORS[i % COLORS.length], r: 2 }} />
+                ))}
+                <Radar name="Média" dataKey="avg" stroke={C.purple} fill={C.purple} fillOpacity={0.1} strokeWidth={2.5} dot={{ fill: C.purple, r: 3.5 }} />
+                <Tooltip
+                  contentStyle={{ background: '#FFFFFF', border: `1px solid ${C.border}`, borderRadius: 12, fontSize: 12, color: C.text, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}
+                  formatter={(v, name) => [`${v} — ${LBL[Math.round(v)] || ''}`, name]} />
+              </RadarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.hint, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Pontos de Atenção</div>
+              {hBySD.slice(0, 2).map(d => (
+                <div key={d.id} style={{ ...card, borderTop: `3px solid ${C.red}`, padding: '14px 16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <div style={{ width: 20, height: 20, borderRadius: 5, background: '#FEF2F2', border: '1px solid #FEE2E2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: C.red, flexShrink: 0 }}>{d.abbr}</div>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>{d.label}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: C.muted }}>Média {d.avg.toFixed(1)} · Variação {d.range}pts</div>
+                </div>
+              ))}
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.hint, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Destaques Positivos</div>
+              {hByAvg.slice(0, 2).map(d => (
+                <div key={d.id} style={{ ...card, borderTop: `3px solid ${C.green}`, padding: '14px 16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <div style={{ width: 20, height: 20, borderRadius: 5, background: '#ECFDF5', border: '1px solid #D1FAE5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: C.green, flexShrink: 0 }}>{d.abbr}</div>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>{d.label}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: C.muted }}>Média {d.avg.toFixed(1)} · {LBL[Math.round(d.avg)]}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ ...card, borderColor: C.border, marginBottom: 24 }}>
+            <span style={lbl}>Comentários do Time (Anônimo)</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {hEvals.filter(e => e.comments?.trim()).map((e, idx) => (
+                <div key={e.id || idx} style={{ padding: '10px 14px', background: C.bg3, borderRadius: 8, fontSize: 13, borderLeft: `3px solid ${COLORS[idx % COLORS.length]}`, lineHeight: 1.5 }}>
+                  <div style={{ fontStyle: 'italic', color: C.text, whiteSpace: 'pre-wrap' }}>&ldquo;{e.comments}&rdquo;</div>
+                  <div style={{ fontSize: 10, color: C.muted, marginTop: 6, textAlign: 'right', fontWeight: 600 }}>— Participante P{idx + 1}</div>
+                </div>
+              ))}
+              {hEvals.filter(e => e.comments?.trim()).length === 0 && (
+                <div style={{ fontSize: 13, color: C.muted, fontStyle: 'italic', textAlign: 'center', padding: '12px 0' }}>Nenhum comentário textual.</div>
+              )}
+            </div>
+          </div>
+
+          {(hLess.length > 0 || hActs.length > 0) && (
+            <div style={{ ...card, borderColor: '#C7D2FE', background: '#F8FAFC', marginBottom: 24 }}>
+              <span style={{ ...lbl, color: C.purple }}>Lições Aprendidas & Plano de Ação</span>
+              {hLess.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 8 }}>Lições Aprendidas</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {hLess.map((l, i) => (
+                      <div key={i} style={{ background: '#FFFFFF', padding: '8px 12px', borderRadius: 6, fontSize: 13, border: `1px solid ${C.border}`, color: C.text }}>{l}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {hActs.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 8 }}>Plano de Ação</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {hActs.map(a => (
+                      <div key={a.id} style={{ display: 'flex', alignItems: 'flex-start', background: '#FFFFFF', padding: '10px 12px', borderRadius: 6, fontSize: 13, gap: 10, border: `1px solid ${C.border}`, borderLeft: `3px solid ${a.done ? C.green : C.purple}` }}>
+                        <span style={{ marginTop: 1, flexShrink: 0, color: a.done ? C.green : C.muted, fontWeight: 700 }}>{a.done ? '✓' : '○'}</span>
+                        <div style={{ flex: 1, textDecoration: a.done ? 'line-through' : 'none', color: a.done ? C.muted : C.text }}>
+                          <div>{a.text}</div>
+                          <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>Responsável: <strong>{a.owner}</strong></div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            <button style={{ ...btn, flex: 1, justifyContent: 'center', color: C.purple, border: `2px solid ${C.purple}`, fontWeight: 700 }}
+              onClick={() => {
+                const blob = new Blob([generateMarkdown(hSess, hEvals, hLess, hActs, '')], { type: 'text/markdown;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.setAttribute('download', `relatorio_retro_otmow_${hSess.name.toLowerCase().replace(/\s+/g, '_')}.md`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+              }}>
+              Exportar Markdown
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ── RESULTS ──
   const chartData = getChartData();

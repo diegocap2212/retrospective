@@ -1,0 +1,13 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // State document — any client can read/write (no auth needed for this tool)
+    match /state/{doc} {
+      allow read, write: if true;
+    }
+    // History entries — any client can read/write
+    match /history/{doc} {
+      allow read, write: if true;
+    }
+  }
+}
