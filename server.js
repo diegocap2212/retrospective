@@ -1,10 +1,32 @@
 import express from "express";
 import cors from "cors";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Try to load .env file locally for development
+if (fs.existsSync(path.join(__dirname, ".env"))) {
+  try {
+    const envContent = fs.readFileSync(path.join(__dirname, ".env"), "utf-8");
+    envContent.split(/\r?\n/).forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) return;
+      const index = trimmed.indexOf("=");
+      if (index > 0) {
+        const key = trimmed.substring(0, index).trim();
+        const value = trimmed.substring(index + 1).trim().replace(/^['"]|['"]$/g, '');
+        if (key && !process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+    });
+  } catch (err) {
+    console.error("Erro ao ler arquivo .env local:", err);
+  }
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
