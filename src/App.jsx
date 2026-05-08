@@ -226,6 +226,74 @@ export default function App() {
     setLoadingAI(false);
   }
 
+  function exportReport() {
+    if (!session) return;
+    
+    let md = `# 📊 Relatório Oficial de Retrospectiva · Ótmow\n\n`;
+    md += `**Sessão:** ${session.name}\n`;
+    md += `**Data do Relatório:** ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}\n`;
+    md += `**Total de Participantes:** ${evals.length} participante(s)\n\n`;
+    
+    md += `--- \n\n`;
+    md += `## 📈 Notas Médias por Dimensão\n\n`;
+    session.dimensions.forEach(d => {
+      const stats = getStats(d.id);
+      md += `- **${d.label}:** Média **${stats.avg.toFixed(1)}/5.0** (Variação: ${stats.range}pts)\n`;
+    });
+    md += `\n`;
+    
+    md += `--- \n\n`;
+    md += `## 💬 Comentários e Opiniões do Time (Anônimo)\n\n`;
+    const commentsList = evals.filter(e => e.comments?.trim());
+    if (commentsList.length > 0) {
+      commentsList.forEach((e, idx) => {
+        md += `> "${e.comments.trim()}"\n> *— Participante P${idx + 1}*\n\n`;
+      });
+    } else {
+      md += `*Nenhum comentário textual enviado.*\n\n`;
+    }
+    
+    md += `--- \n\n`;
+    md += `## 💡 Lições Aprendidas\n\n`;
+    if (lessons.length > 0) {
+      lessons.forEach(l => {
+        md += `- ${l}\n`;
+      });
+    } else {
+      md += `*Nenhuma lição aprendida registrada.*\n\n`;
+    }
+    md += `\n`;
+    
+    md += `--- \n\n`;
+    md += `## 🎯 Plano de Ação & Responsáveis\n\n`;
+    if (actions.length > 0) {
+      actions.forEach(act => {
+        md += `- [${act.done ? 'x' : ' '}] **${act.text}** (Responsável: *${act.owner}*)\n`;
+      });
+    } else {
+      md += `*Nenhum item criado no plano de ação.*\n\n`;
+    }
+    md += `\n`;
+    
+    if (agenda) {
+      md += `--- \n\n`;
+      md += `## 📋 Insights sugeridos pela IA\n\n`;
+      md += `${agenda}\n\n`;
+    }
+    
+    md += `--- \n`;
+    md += `*Relatório gerado automaticamente pela ferramenta de Retrospectivas Ótmow.*\n`;
+
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `relatorio_retro_otmow_${session.name.toLowerCase().replace(/\\s+/g, '_')}.md`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
   // ── Design tokens ──
   const C = {
     bg: 'radial-gradient(circle at 50% 0%, #EFF6FF 0%, #F8FAFC 100%)',
@@ -620,11 +688,19 @@ export default function App() {
               </div>
             </div>
 
-            <button
-              style={{ ...btnP, background: 'linear-gradient(135deg, #4F46E5 0%, #10B981 100%)', marginBottom: 16, opacity: loadingAI ? 0.7 : 1 }}
-              onClick={genAgenda} disabled={loadingAI}>
-              {loadingAI ? 'Analisando dados...' : 'Analisar sentimentos e sugerir pauta via IA'}
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+              <button
+                style={{ ...btnP, background: 'linear-gradient(135deg, #4F46E5 0%, #10B981 100%)', opacity: loadingAI ? 0.7 : 1 }}
+                onClick={genAgenda} disabled={loadingAI}>
+                {loadingAI ? 'Analisando dados...' : 'Analisar sentimentos e sugerir pauta via IA'}
+              </button>
+
+              <button
+                style={{ ...btn, background: '#FFFFFF', color: C.purple, border: `2px solid ${C.purple}`, fontWeight: 700, padding: '12px' }}
+                onClick={exportReport}>
+                Exportar Atas & Plano de Ação (Markdown)
+              </button>
+            </div>
 
             {agenda && (
               <div style={{ ...card, borderColor: '#C7D2FE' }}>
