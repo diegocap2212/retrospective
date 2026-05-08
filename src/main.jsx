@@ -93,6 +93,17 @@ window.storage = {
 
 // Expose Firestore helpers for action plan and history
 window.firestoreHelpers = {
+  getState: async () => {
+    const snap = await getDoc(doc(db, STATE_DOC));
+    if (!snap.exists()) return { session: null, evals: [], actionPlan: { lessons: [], actions: [] } };
+    const data = snap.data();
+    return {
+      session: data.session || null,
+      evals: data.evals || [],
+      actionPlan: data.actionPlan || { lessons: [], actions: [] }
+    };
+  },
+
   getActionPlan: async () => {
     const snap = await getDoc(doc(db, STATE_DOC));
     if (!snap.exists()) return { lessons: [], actions: [] };

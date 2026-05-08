@@ -71,8 +71,13 @@ export default function App() {
 
   async function loadData() {
     let sess = null, evArr = [], submitted = false, savedNick = '';
-    try { const r = await window.storage.get('retro:session', true); sess = JSON.parse(r.value); } catch (e) {}
-    try { const r = await window.storage.get('retro:evals', true);   evArr = JSON.parse(r.value); } catch (e) {}
+    try {
+      const state = await window.firestoreHelpers.getState();
+      sess  = state.session;
+      evArr = state.evals;
+      setLessons(state.actionPlan.lessons);
+      setActions(state.actionPlan.actions);
+    } catch (e) {}
     try {
       const r = await window.storage.get('retro:mine');
       const d = JSON.parse(r.value);
@@ -80,7 +85,6 @@ export default function App() {
     } catch (e) {}
     setSession(sess); setEvals(evArr); setHasSub(submitted);
     if (savedNick) setNick(savedNick);
-    await loadActionPlan();
     await loadHistory();
     setScreen('home');
   }
@@ -145,7 +149,6 @@ export default function App() {
     const sess = { name: sessName.trim() || 'Retro Otmow', dimensions: dims, created: Date.now().toString() };
     try {
       await window.storage.set('retro:session', JSON.stringify(sess), true);
-      await window.storage.set('retro:evals',   JSON.stringify([]),   true);
       try { await window.storage.delete('retro:mine'); } catch (e) {}
       setSession(sess); setEvals([]); setHasSub(false); setAgenda(''); setErr('');
       setLessons([]); setActions([]);
